@@ -17,12 +17,12 @@ const TOP_WALL: f32 = 350.0;
 
 const WALL_COLOR: Color = Color::rgb(1.0, 0.5, 0.5);
 
+const STEP_SIZE: f32 = 20.0;
+
 #[derive(Component)]
 struct Collider;
 
-#[derive(Default)]
 enum Direction {
-    #[default]
     Up,
     Down,
     Left,
@@ -35,74 +35,94 @@ struct SnakeSegment {
     entity: Option<Entity>,
 }
 
-#[derive(Resource, Default)]
+#[derive(Resource)]
 struct Snake {
     direction: Direction,
     body: LinkedList<SnakeSegment>,
     tail: Option<SnakeSegment>,
     entity: Option<Entity>,
+    move_cooldown: Timer,
 }
 
-impl Snake {
-    fn new(x: f32, y: f32) -> Snake {
+impl Default for Snake {
+    fn default() -> Self {
         let mut body = LinkedList::new();
-        body.push_back(SnakeSegment {
-            x: x + 50.0,
-            y,
-            entity: None,
-        });
-        body.push_back(SnakeSegment {
-            x: x + 20.0,
-            y,
-            entity: None,
-        });
-        body.push_back(SnakeSegment { x, y, entity: None });
+        let mut x = 20.0;
+        let mut y = 20.0;
+
+        for _ in 0..3 {
+            y += STEP_SIZE;
+            body.push_back(SnakeSegment { x, y, entity: None });
+        }
 
         Snake {
             direction: Direction::Up,
             body,
             tail: None,
             entity: None,
+            move_cooldown: Timer::from_seconds(0.1, TimerMode::Once),
         }
     }
+}
 
+impl Snake {
     fn head_position(&self) -> (f32, f32) {
         let head_segment = self.body.front().unwrap();
         (head_segment.x, head_segment.y)
     }
 
-    fn move_forward(&mut self, direction: Option<Direction>) {
+    fn move_forward(
+        &mut self,
+        direction: Option<Direction>,
+        mut commands: Commands,
+        mut meshes: ResMut<Assets<Mesh>>,
+        mut materials: ResMut<Assets<ColorMaterial>>,
+    ) {
         if let Some(d) = direction {
             self.direction = d;
         }
 
         let (head_position_last_x, head_position_last_y) = self.head_position();
 
-        let new_snake_segment = match self.direction {
+        let mut new_snake_segment = match self.direction {
             Direction::Up => SnakeSegment {
                 x: head_position_last_x,
-                y: head_position_last_y - 1.0,
+                y: head_position_last_y + STEP_SIZE,
                 entity: None,
             },
             Direction::Down => SnakeSegment {
                 x: head_position_last_x,
-                y: head_position_last_y + 1.0,
+                y: head_position_last_y - STEP_SIZE,
                 entity: None,
             },
             Direction::Left => SnakeSegment {
-                x: head_position_last_x - 1.0,
+                x: head_position_last_x - STEP_SIZE,
                 y: head_position_last_y,
                 entity: None,
             },
             Direction::Right => SnakeSegment {
-                x: head_position_last_x + 1.0,
+                x: head_position_last_x + STEP_SIZE,
                 y: head_position_last_y,
                 entity: None,
             },
         };
 
+        new_snake_segment.entity = Some(
+            commands
+                .spawn(MaterialMesh2dBundle {
+                    mesh: Mesh2dHandle(meshes.add(Rectangle::new(20.0, 20.0))),
+                    material: materials.add(Color::GREEN),
+                    transform: Transform::from_xyz(new_snake_segment.x, new_snake_segment.y, 0.0),
+                    ..default()
+                })
+                .id(),
+        );
         self.body.push_front(new_snake_segment);
         let removed_segment = self.body.pop_back().unwrap();
+        commands
+            .get_entity(removed_segment.entity.unwrap())
+            .unwrap()
+            .despawn();
         self.tail = Some(removed_segment);
     }
 }
@@ -173,7 +193,7 @@ fn main() {
         .init_resource::<Snake>()
         .add_plugins(DefaultPlugins)
         .add_systems(Startup, setup)
-        // .add_systems(FixedUpdate, move_planet)
+        .add_systems(Update, move_snake)
         .run();
 }
 
@@ -190,7 +210,6 @@ fn setup(
     commands.spawn(WallBundle::new(WallLocation::Bottom));
     commands.spawn(WallBundle::new(WallLocation::Top));
 
-    *snake = Snake::new(20.0, 20.0);
     for segment in snake.body.iter_mut() {
         segment.entity = Some(
             commands
@@ -205,43 +224,42 @@ fn setup(
     }
 }
 
-// fn apple_setup(
-//     mut commands: Commands,
-//     mut meshes: ResMut<Assets<Mesh>>,
-//     mut materials: ResMut<Assets<ColorMaterial>>,
-// ) {
-//     commands.spawn(Camera2dBundle::default());
+fn move_snake(
+    mut commands: Commands,
+    mut snake: ResMut<Snake>,
+    time: Res<Time>,
+    keyboard_input: Res<ButtonInput<KeyCode>>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<ColorMaterial>>,
+    mut transforms: Query<&mut Transform>,
+) {
+    if snake.move_cooldown.tick(time.delta()).finished() {
+        let mut moved = false;
+        let mut direction: Direction = Direction::Down;
 
-//     commands.spawn((
-//         MaterialMesh2dBundle {
-//             mesh: Mesh2dHandle(meshes.add(Rectangle::new(20.0, 20.0))),
-//             material: materials.add(Color::RED),
-//             transform: Transform::from_xyz(0.0, 0.0, 0.0),
-//             ..default()
-//         },
-//         Planet,
-//     ));
-// }
-// fn move_planet(
-//     mut query: Query<(&mut Transform, &mut Planet)>,
-//     keyboard_input: Res<ButtonInput<KeyCode>>,
-//     mut windows: Query<&mut Window>,
-//     time: Res<Time>,
-// ) {
-//     if keyboard_input.pressed(KeyCode::KeyR) {
-//         let mut rng = thread_rng();
-//         if let Some((mut transform, _planet)) = query.iter_mut().next() {
-//             if rng.gen() {
-//                 println!("after gen()");
-//                 let window = windows.single_mut();
-//                 let max_x = window.resolution.physical_width() as i32;
-//                 let max_y = window.resolution.physical_height() as i32;
-//                 let x = rng.gen_range(-max_x..max_x) as f32;
-//                 let y = rng.gen_range(-max_y..max_y) as f32;
-//                 println!("{}, {}", x, y);
-//                 transform.translation.x = x * time.delta_seconds();
-//                 transform.translation.y = y * time.delta_seconds();
-//             }
-//         }
-//     }
-// }
+        if keyboard_input.pressed(KeyCode::ArrowDown) {
+            direction = Direction::Down;
+            moved = true;
+        }
+
+        if keyboard_input.pressed(KeyCode::ArrowUp) {
+            direction = Direction::Up;
+            moved = true;
+        }
+
+        if keyboard_input.pressed(KeyCode::ArrowLeft) {
+            direction = Direction::Left;
+            moved = true;
+        }
+
+        if keyboard_input.pressed(KeyCode::ArrowRight) {
+            direction = Direction::Right;
+            moved = true;
+        }
+
+        if moved {
+            snake.move_cooldown.reset();
+            snake.move_forward(Some(direction), commands, meshes, materials)
+        }
+    }
+}
