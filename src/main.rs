@@ -1,6 +1,7 @@
 use std::{collections::LinkedList, default};
 
 use bevy::{
+    math::bounding::{Aabb2d, BoundingVolume, IntersectsVolume},
     prelude::*,
     reflect::impl_from_reflect_value,
     sprite::{MaterialMesh2dBundle, Mesh2dHandle},
@@ -17,11 +18,12 @@ const TOP_WALL: f32 = 350.0;
 
 const WALL_COLOR: Color = Color::rgb(1.0, 0.5, 0.5);
 
-const STEP_SIZE: f32 = 20.0;
+const STEP_SIZE: f32 = 10.0;
 
 #[derive(Component)]
 struct Collider;
 
+#[derive(PartialEq)]
 enum Direction {
     Up,
     Down,
@@ -29,101 +31,71 @@ enum Direction {
     Right,
 }
 
+#[derive(Clone)]
 struct SnakeSegment {
     x: f32,
     y: f32,
     entity: Option<Entity>,
 }
 
+#[derive(Component)]
+struct SnakeHead;
+
+#[derive(Component)]
+struct SnakeTail;
+
+#[derive(Component)]
+struct SnakeBodySegment;
+
 #[derive(Resource)]
 struct Snake {
     direction: Direction,
     body: LinkedList<SnakeSegment>,
-    tail: Option<SnakeSegment>,
+    head: SnakeSegment,
+    tail: SnakeSegment,
     entity: Option<Entity>,
     move_cooldown: Timer,
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+enum Collision {
+    Left,
+    Right,
+    Top,
+    Bottom,
 }
 
 impl Default for Snake {
     fn default() -> Self {
         let mut body = LinkedList::new();
-        let mut x = 20.0;
+        let x = 20.0;
         let mut y = 20.0;
 
-        for _ in 0..3 {
-            y += STEP_SIZE;
+        let head = SnakeSegment {
+            x,
+            y: y + STEP_SIZE,
+            entity: None,
+        };
+
+        for i in 2..=20 {
+            y += STEP_SIZE * (i as f32);
             body.push_back(SnakeSegment { x, y, entity: None });
         }
 
+        let tail = SnakeSegment {
+            x,
+            y: y + (STEP_SIZE * 11.0),
+            entity: None,
+        };
+
         Snake {
             direction: Direction::Up,
+            head,
             body,
-            tail: None,
+            tail,
             entity: None,
             move_cooldown: Timer::from_seconds(0.1, TimerMode::Once),
         }
-    }
-}
-
-impl Snake {
-    fn head_position(&self) -> (f32, f32) {
-        let head_segment = self.body.front().unwrap();
-        (head_segment.x, head_segment.y)
-    }
-
-    fn move_forward(
-        &mut self,
-        direction: Option<Direction>,
-        mut commands: Commands,
-        mut meshes: ResMut<Assets<Mesh>>,
-        mut materials: ResMut<Assets<ColorMaterial>>,
-    ) {
-        if let Some(d) = direction {
-            self.direction = d;
-        }
-
-        let (head_position_last_x, head_position_last_y) = self.head_position();
-
-        let mut new_snake_segment = match self.direction {
-            Direction::Up => SnakeSegment {
-                x: head_position_last_x,
-                y: head_position_last_y + STEP_SIZE,
-                entity: None,
-            },
-            Direction::Down => SnakeSegment {
-                x: head_position_last_x,
-                y: head_position_last_y - STEP_SIZE,
-                entity: None,
-            },
-            Direction::Left => SnakeSegment {
-                x: head_position_last_x - STEP_SIZE,
-                y: head_position_last_y,
-                entity: None,
-            },
-            Direction::Right => SnakeSegment {
-                x: head_position_last_x + STEP_SIZE,
-                y: head_position_last_y,
-                entity: None,
-            },
-        };
-
-        new_snake_segment.entity = Some(
-            commands
-                .spawn(MaterialMesh2dBundle {
-                    mesh: Mesh2dHandle(meshes.add(Rectangle::new(20.0, 20.0))),
-                    material: materials.add(Color::GREEN),
-                    transform: Transform::from_xyz(new_snake_segment.x, new_snake_segment.y, 0.0),
-                    ..default()
-                })
-                .id(),
-        );
-        self.body.push_front(new_snake_segment);
-        let removed_segment = self.body.pop_back().unwrap();
-        commands
-            .get_entity(removed_segment.entity.unwrap())
-            .unwrap()
-            .despawn();
-        self.tail = Some(removed_segment);
     }
 }
 
@@ -193,6 +165,7 @@ fn main() {
         .init_resource::<Snake>()
         .add_plugins(DefaultPlugins)
         .add_systems(Startup, setup)
+        .add_systems(FixedUpdate, (check_for_collisions))
         .add_systems(Update, move_snake)
         .run();
 }
@@ -210,18 +183,43 @@ fn setup(
     commands.spawn(WallBundle::new(WallLocation::Bottom));
     commands.spawn(WallBundle::new(WallLocation::Top));
 
+    commands.spawn((
+        MaterialMesh2dBundle {
+            mesh: Mesh2dHandle(meshes.add(Rectangle::new(20.0, 20.0))),
+            material: materials.add(Color::GREEN),
+            transform: Transform::from_xyz(snake.head.x, snake.head.y, 0.0),
+            ..default()
+        },
+        SnakeHead,
+        Collider,
+    ));
+
     for segment in snake.body.iter_mut() {
         segment.entity = Some(
             commands
-                .spawn(MaterialMesh2dBundle {
-                    mesh: Mesh2dHandle(meshes.add(Rectangle::new(20.0, 20.0))),
-                    material: materials.add(Color::GREEN),
-                    transform: Transform::from_xyz(segment.x, segment.y, 0.0),
-                    ..default()
-                })
+                .spawn((
+                    MaterialMesh2dBundle {
+                        mesh: Mesh2dHandle(meshes.add(Rectangle::new(20.0, 20.0))),
+                        material: materials.add(Color::GREEN),
+                        transform: Transform::from_xyz(segment.x, segment.y, 0.0),
+                        ..default()
+                    },
+                    SnakeBodySegment,
+                ))
                 .id(),
         );
     }
+
+    commands.spawn((
+        MaterialMesh2dBundle {
+            mesh: Mesh2dHandle(meshes.add(Rectangle::new(20.0, 20.0))),
+            material: materials.add(Color::GREEN),
+            transform: Transform::from_xyz(snake.tail.x, snake.tail.y, 0.0),
+            ..default()
+        },
+        SnakeTail,
+        Collider,
+    ));
 }
 
 fn move_snake(
@@ -231,35 +229,99 @@ fn move_snake(
     keyboard_input: Res<ButtonInput<KeyCode>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
-    mut transforms: Query<&mut Transform>,
+    // mut transforms: Query<&mut Transform>,
+    mut snake_head_query: Query<&mut Transform, (With<Collider>, With<SnakeHead>)>,
+    mut snake_body_segment_query: Query<
+        &mut Transform,
+        (With<SnakeBodySegment>, Without<SnakeHead>),
+    >,
 ) {
     if snake.move_cooldown.tick(time.delta()).finished() {
+        let mut snake_head_transform = snake_head_query.single_mut();
         let mut moved = false;
-        let mut direction: Direction = Direction::Down;
+
+        snake.move_cooldown.reset();
+        let mut current_position = snake_head_transform.translation;
+        let mut prev_position: Vec3 = Vec3::new(0., 0., 0.);
 
         if keyboard_input.pressed(KeyCode::ArrowDown) {
-            direction = Direction::Down;
             moved = true;
+            snake_head_transform.translation.y -= STEP_SIZE;
         }
 
         if keyboard_input.pressed(KeyCode::ArrowUp) {
-            direction = Direction::Up;
             moved = true;
+            snake_head_transform.translation.y += STEP_SIZE;
         }
 
         if keyboard_input.pressed(KeyCode::ArrowLeft) {
-            direction = Direction::Left;
             moved = true;
+            snake_head_transform.translation.x -= STEP_SIZE;
         }
 
         if keyboard_input.pressed(KeyCode::ArrowRight) {
-            direction = Direction::Right;
             moved = true;
+            snake_head_transform.translation.x += STEP_SIZE;
         }
 
         if moved {
-            snake.move_cooldown.reset();
-            snake.move_forward(Some(direction), commands, meshes, materials)
+            for mut snake_body_segments_transform in snake_body_segment_query.iter_mut() {
+                prev_position = snake_body_segments_transform.translation;
+                snake_body_segments_transform.translation.x = current_position.x;
+                snake_body_segments_transform.translation.y = current_position.y;
+                current_position = prev_position;
+            }
         }
     }
+}
+
+fn check_for_collisions(
+    mut commands: Commands,
+    mut snake: ResMut<Snake>,
+    mut snake_head_query: Query<(Entity, &Transform), (With<SnakeHead>, With<Collider>)>,
+    collider_query: Query<(Entity, &Transform), (With<Collider>, Without<SnakeHead>)>,
+) {
+    for (snake_segment_entity, snake_segment_transform) in &snake_head_query {
+        for (collider_entity, collider_transform) in &collider_query {
+            let snake_segment_bounded = Aabb2d::new(
+                snake_segment_transform.translation.truncate(),
+                snake_segment_transform.scale.truncate() / 2.0,
+            );
+            let wall_bounded = Aabb2d::new(
+                collider_transform.translation.truncate(),
+                collider_transform.scale.truncate() / 2.0,
+            );
+            let collision = collided_with_wall(snake_segment_bounded, wall_bounded);
+            if let Some(collision) = collision {
+                println!(
+                    "[{:?}]Collision registered on {:?}",
+                    std::time::SystemTime::now(),
+                    collision
+                );
+            }
+        }
+    }
+}
+
+fn collided_with_wall(snake_segment: Aabb2d, wall: Aabb2d) -> Option<Collision> {
+    if !snake_segment.intersects(&wall) {
+        return None;
+    }
+
+    let closest = wall.closest_point(snake_segment.center());
+
+    let offset = snake_segment.center() - closest;
+
+    let side = if offset.x.abs() > offset.y.abs() {
+        if offset.x < 0.0 {
+            Collision::Left
+        } else {
+            Collision::Right
+        }
+    } else if offset.y > 0.0 {
+        Collision::Top
+    } else {
+        Collision::Bottom
+    };
+    Some(side)
 }
