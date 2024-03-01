@@ -1,7 +1,10 @@
 use std::{collections::LinkedList, default};
 
 use bevy::{
-    math::bounding::{Aabb2d, BoundingVolume, IntersectsVolume},
+    math::{
+        bounding::{Aabb2d, BoundingVolume, IntersectsVolume},
+        vec2,
+    },
     prelude::*,
     reflect::impl_from_reflect_value,
     sprite::{MaterialMesh2dBundle, Mesh2dHandle},
@@ -19,6 +22,8 @@ const TOP_WALL: f32 = 350.0;
 const WALL_COLOR: Color = Color::rgb(1.0, 0.5, 0.5);
 
 const STEP_SIZE: f32 = 10.0;
+const STEP_VELOCITY: f32 = 0.5;
+const SNAKE_HEAD_HITBOX: Vec2 = vec2(20.0, 20.0);
 
 #[derive(Component)]
 struct Collider;
@@ -42,7 +47,7 @@ struct SnakeSegment {
 struct SnakeHead;
 
 #[derive(Component)]
-struct SnakeTail;
+struct Apple;
 
 #[derive(Component)]
 struct SnakeBodySegment;
@@ -52,7 +57,6 @@ struct Snake {
     direction: Direction,
     body: LinkedList<SnakeSegment>,
     head: SnakeSegment,
-    tail: SnakeSegment,
     entity: Option<Entity>,
     move_cooldown: Timer,
 }
@@ -77,22 +81,15 @@ impl Default for Snake {
             entity: None,
         };
 
-        for i in 2..=20 {
+        for i in 2..=4 {
             y += STEP_SIZE * (i as f32);
             body.push_back(SnakeSegment { x, y, entity: None });
         }
-
-        let tail = SnakeSegment {
-            x,
-            y: y + (STEP_SIZE * 11.0),
-            entity: None,
-        };
 
         Snake {
             direction: Direction::Up,
             head,
             body,
-            tail,
             entity: None,
             move_cooldown: Timer::from_seconds(0.1, TimerMode::Once),
         }
@@ -209,15 +206,15 @@ fn setup(
                 .id(),
         );
     }
-
+    let apple_pos = apple_rng_position();
     commands.spawn((
         MaterialMesh2dBundle {
             mesh: Mesh2dHandle(meshes.add(Rectangle::new(20.0, 20.0))),
-            material: materials.add(Color::GREEN),
-            transform: Transform::from_xyz(snake.tail.x, snake.tail.y, 0.0),
+            material: materials.add(Color::RED),
+            transform: Transform::from_xyz(apple_pos.x, apple_pos.y, apple_pos.z),
             ..default()
         },
-        SnakeTail,
+        Apple,
         Collider,
     ));
 }
@@ -246,22 +243,22 @@ fn move_snake(
 
         if keyboard_input.pressed(KeyCode::ArrowDown) {
             moved = true;
-            snake_head_transform.translation.y -= STEP_SIZE;
+            snake_head_transform.translation.y -= STEP_SIZE * STEP_VELOCITY;
         }
 
         if keyboard_input.pressed(KeyCode::ArrowUp) {
             moved = true;
-            snake_head_transform.translation.y += STEP_SIZE;
+            snake_head_transform.translation.y += STEP_SIZE * STEP_VELOCITY;
         }
 
         if keyboard_input.pressed(KeyCode::ArrowLeft) {
             moved = true;
-            snake_head_transform.translation.x -= STEP_SIZE;
+            snake_head_transform.translation.x -= STEP_SIZE * STEP_VELOCITY;
         }
 
         if keyboard_input.pressed(KeyCode::ArrowRight) {
             moved = true;
-            snake_head_transform.translation.x += STEP_SIZE;
+            snake_head_transform.translation.x += STEP_SIZE * STEP_VELOCITY;
         }
 
         if moved {
@@ -279,36 +276,51 @@ fn check_for_collisions(
     mut commands: Commands,
     mut snake: ResMut<Snake>,
     mut snake_head_query: Query<(Entity, &Transform), (With<SnakeHead>, With<Collider>)>,
-    collider_query: Query<(Entity, &Transform), (With<Collider>, Without<SnakeHead>)>,
+    collider_query: Query<
+        (Entity, &Transform, Option<&Apple>),
+        (With<Collider>, Without<SnakeHead>),
+    >,
 ) {
-    for (snake_segment_entity, snake_segment_transform) in &snake_head_query {
-        for (collider_entity, collider_transform) in &collider_query {
-            let snake_segment_bounded = Aabb2d::new(
-                snake_segment_transform.translation.truncate(),
-                snake_segment_transform.scale.truncate() / 2.0,
+    for (snake_segment_entity, snake_head_transform) in &snake_head_query {
+        for (collider_entity, collider_transform, maybe_apple) in &collider_query {
+            let snake_head_bounded = Aabb2d::new(
+                snake_head_transform.translation.truncate(),
+                SNAKE_HEAD_HITBOX / 2.0,
             );
-            let wall_bounded = Aabb2d::new(
-                collider_transform.translation.truncate(),
-                collider_transform.scale.truncate() / 2.0,
-            );
-            let collision = collided_with_wall(snake_segment_bounded, wall_bounded);
+            let hitbox = if maybe_apple.is_some() {
+                SNAKE_HEAD_HITBOX / 2.0
+            } else {
+                collider_transform.scale.truncate() / 2.0
+            };
+
+            let wall_or_apple_bounded =
+                Aabb2d::new(collider_transform.translation.truncate(), hitbox);
+            let collision = collided_with_wall_apple(snake_head_bounded, wall_or_apple_bounded);
             if let Some(collision) = collision {
-                println!(
-                    "[{:?}]Collision registered on {:?}",
-                    std::time::SystemTime::now(),
-                    collision
-                );
+                if maybe_apple.is_some() {
+                    println!(
+                        "[{:?}]Collision with Apple on {:?}",
+                        std::time::SystemTime::now(),
+                        collision
+                    );
+                } else {
+                    println!(
+                        "[{:?}]Collision with Wall on {:?}",
+                        std::time::SystemTime::now(),
+                        collision
+                    );
+                }
             }
         }
     }
 }
 
-fn collided_with_wall(snake_segment: Aabb2d, wall: Aabb2d) -> Option<Collision> {
-    if !snake_segment.intersects(&wall) {
+fn collided_with_wall_apple(snake_segment: Aabb2d, wall_or_apple: Aabb2d) -> Option<Collision> {
+    if !snake_segment.intersects(&wall_or_apple) {
         return None;
     }
 
-    let closest = wall.closest_point(snake_segment.center());
+    let closest = wall_or_apple.closest_point(snake_segment.center());
 
     let offset = snake_segment.center() - closest;
 
@@ -324,4 +336,12 @@ fn collided_with_wall(snake_segment: Aabb2d, wall: Aabb2d) -> Option<Collision> 
         Collision::Bottom
     };
     Some(side)
+}
+
+fn apple_rng_position() -> Vec3 {
+    let mut rng = thread_rng();
+    let x = rng.gen_range(-550..550) as f32;
+    let y = rng.gen_range(-350..350) as f32;
+    let z = 0.0;
+    Vec3 { x, y, z }
 }
