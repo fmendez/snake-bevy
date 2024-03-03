@@ -1,4 +1,4 @@
-use std::{collections::LinkedList, default};
+use std::collections::LinkedList;
 
 use bevy::{
     math::{
@@ -6,9 +6,7 @@ use bevy::{
         vec2,
     },
     prelude::*,
-    reflect::impl_from_reflect_value,
     sprite::{MaterialMesh2dBundle, Mesh2dHandle},
-    window::WindowResolution,
 };
 
 use rand::prelude::*;
@@ -180,37 +178,14 @@ fn setup(
     commands.spawn(WallBundle::new(WallLocation::Bottom));
     commands.spawn(WallBundle::new(WallLocation::Top));
 
-    commands.spawn((
-        MaterialMesh2dBundle {
-            mesh: Mesh2dHandle(meshes.add(Rectangle::new(20.0, 20.0))),
-            material: materials.add(Color::GREEN),
-            transform: Transform::from_xyz(snake.head.x, snake.head.y, 0.0),
-            ..default()
-        },
-        SnakeHead,
-        Collider,
-    ));
-
-    for segment in snake.body.iter_mut() {
-        segment.entity = Some(snake_segment_spawn(
-            &mut commands,
-            &mut meshes,
-            &mut materials,
-            segment.x,
-            segment.y,
-        ));
-    }
+    snake_spawn(&mut commands, &mut meshes, &mut materials);
     apple_spawn(&mut commands, &mut meshes, &mut materials);
 }
 
 fn move_snake(
-    mut commands: Commands,
     mut snake: ResMut<Snake>,
     time: Res<Time>,
     keyboard_input: Res<ButtonInput<KeyCode>>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<ColorMaterial>>,
-    // mut transforms: Query<&mut Transform>,
     mut snake_head_query: Query<&mut Transform, (With<Collider>, With<SnakeHead>)>,
     mut snake_body_segment_query: Query<
         &mut Transform,
@@ -261,8 +236,8 @@ fn check_for_collisions(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
     mut commands: Commands,
-    mut snake: ResMut<Snake>,
-    mut snake_head_query: Query<(Entity, &Transform), (With<SnakeHead>, With<Collider>)>,
+    // mut snake: ResMut<Snake>,
+    snake_head_query: Query<(Entity, &Transform), (With<SnakeHead>, With<Collider>)>,
     collider_query: Query<
         (Entity, &Transform, Option<&Apple>),
         (With<Collider>, Without<SnakeHead>),
@@ -336,8 +311,9 @@ fn collided_with_wall_apple(snake_segment: Aabb2d, wall_or_apple: Aabb2d) -> Opt
 
 fn apple_rng_position() -> Vec3 {
     let mut rng = thread_rng();
-    let x = rng.gen_range(LEFT_WALL..RIGHT_WALL) as f32;
-    let y = rng.gen_range(BOTTOM_WALL..TOP_WALL) as f32;
+    let x = rng.gen_range((LEFT_WALL + WALL_THICKNESS)..(RIGHT_WALL - WALL_THICKNESS)) as f32;
+    let y = rng.gen_range((BOTTOM_WALL + WALL_THICKNESS)..(TOP_WALL - WALL_THICKNESS)) as f32;
+
     let z = -2.0;
     Vec3 { x, y, z }
 }
@@ -378,4 +354,33 @@ fn snake_segment_spawn(
             SnakeBodySegment,
         ))
         .id()
+}
+
+fn snake_spawn(
+    mut commands: &mut Commands,
+    mut meshes: &mut ResMut<Assets<Mesh>>,
+    mut materials: &mut ResMut<Assets<ColorMaterial>>,
+) {
+    let mut snake = Snake::default();
+
+    commands.spawn((
+        MaterialMesh2dBundle {
+            mesh: Mesh2dHandle(meshes.add(Rectangle::new(20.0, 20.0))),
+            material: materials.add(Color::GREEN),
+            transform: Transform::from_xyz(snake.head.x, snake.head.y, 0.0),
+            ..default()
+        },
+        SnakeHead,
+        Collider,
+    ));
+
+    for segment in snake.body.iter_mut() {
+        segment.entity = Some(snake_segment_spawn(
+            &mut commands,
+            &mut meshes,
+            &mut materials,
+            segment.x,
+            segment.y,
+        ));
+    }
 }
