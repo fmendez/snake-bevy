@@ -59,6 +59,11 @@ struct Snake {
     move_cooldown: Timer,
 }
 
+#[derive(Resource, Default)]
+struct Scoreboard {
+    score: u32,
+}
+
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 enum Collision {
     Left,
@@ -158,9 +163,10 @@ impl WallBundle {
 fn main() {
     App::new()
         .init_resource::<Snake>()
+        .init_resource::<Scoreboard>()
         .add_plugins(DefaultPlugins)
         .add_systems(Startup, setup)
-        .add_systems(FixedUpdate, (check_for_collisions))
+        .add_systems(FixedUpdate, (check_for_collisions, score_update))
         .add_systems(Update, move_snake)
         .run();
 }
@@ -180,6 +186,24 @@ fn setup(
 
     snake_spawn(&mut commands, &mut meshes, &mut materials);
     apple_spawn(&mut commands, &mut meshes, &mut materials);
+
+    // scoreboard
+    commands.spawn(
+        TextBundle::from_section(
+            "Apples Eaten: 0",
+            TextStyle {
+                font_size: 30.0,
+                color: Color::WHITE,
+                ..default()
+            },
+        )
+        .with_style(Style {
+            position_type: PositionType::Absolute,
+            top: Val::Px(10.0),
+            left: Val::Px(10.0),
+            ..default()
+        }),
+    );
 }
 
 fn move_snake(
@@ -236,7 +260,7 @@ fn check_for_collisions(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
     mut commands: Commands,
-    // mut snake: ResMut<Snake>,
+    mut scoreboard: ResMut<Scoreboard>,
     snake_head_query: Query<(Entity, &Transform), (With<SnakeHead>, With<Collider>)>,
     collider_query: Query<
         (Entity, &Transform, Option<&Apple>),
@@ -260,11 +284,7 @@ fn check_for_collisions(
             let collision = collided_with_wall_apple(snake_head_bounded, wall_or_apple_bounded);
             if let Some(collision) = collision {
                 if maybe_apple.is_some() {
-                    println!(
-                        "[{:?}]Collision with Apple on {:?}",
-                        std::time::SystemTime::now(),
-                        collision
-                    );
+                    scoreboard.score += 1;
                     commands.get_entity(collider_entity).unwrap().despawn();
                     apple_spawn(&mut commands, &mut meshes, &mut materials);
                     snake_segment_spawn(
@@ -382,5 +402,11 @@ fn snake_spawn(
             segment.x,
             segment.y,
         ));
+    }
+}
+
+fn score_update(mut scoreboard: ResMut<Scoreboard>, mut query: Query<&mut Text>) {
+    for mut text in query.iter_mut() {
+        text.sections[0].value = format!("Apples Eaten: {}", scoreboard.score);
     }
 }
