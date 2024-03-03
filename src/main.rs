@@ -23,6 +23,13 @@ const STEP_SIZE: f32 = 1.0;
 const STEP_VELOCITY: f32 = 800.0;
 const SNAKE_HEAD_HITBOX: Vec2 = vec2(20.0, 20.0);
 
+#[derive(Debug, Hash, PartialEq, Eq, Clone, Default, States)]
+enum GameState {
+    #[default]
+    Playing,
+    GameOver,
+}
+
 #[derive(Component)]
 struct Collider;
 
@@ -165,10 +172,25 @@ fn main() {
         .init_resource::<Snake>()
         .init_resource::<Scoreboard>()
         .add_plugins(DefaultPlugins)
-        .add_systems(Startup, setup)
-        .add_systems(FixedUpdate, (check_for_collisions, score_update))
-        .add_systems(Update, move_snake)
+        .init_state::<GameState>()
+        .add_systems(Startup, camera_setup)
+        .add_systems(OnEnter(GameState::Playing), setup)
+        .add_systems(OnExit(GameState::Playing), teardown)
+        .add_systems(OnEnter(GameState::GameOver), display_final_score)
+        .add_systems(OnExit(GameState::GameOver), teardown)
+        .add_systems(
+            Update,
+            (check_for_collisions, score_update, move_snake).run_if(in_state(GameState::Playing)),
+        )
+        .add_systems(
+            Update,
+            (gameover_keyboard_input).run_if(in_state(GameState::GameOver)),
+        )
         .run();
+}
+
+fn camera_setup(mut commands: Commands) {
+    commands.spawn(Camera2dBundle::default());
 }
 
 fn setup(
@@ -177,8 +199,6 @@ fn setup(
     mut materials: ResMut<Assets<ColorMaterial>>,
     mut snake: ResMut<Snake>,
 ) {
-    commands.spawn(Camera2dBundle::default());
-
     commands.spawn(WallBundle::new(WallLocation::Left));
     commands.spawn(WallBundle::new(WallLocation::Right));
     commands.spawn(WallBundle::new(WallLocation::Bottom));
@@ -261,6 +281,7 @@ fn check_for_collisions(
     mut materials: ResMut<Assets<ColorMaterial>>,
     mut commands: Commands,
     mut scoreboard: ResMut<Scoreboard>,
+    mut next_state: ResMut<NextState<GameState>>,
     snake_head_query: Query<(Entity, &Transform), (With<SnakeHead>, With<Collider>)>,
     collider_query: Query<
         (Entity, &Transform, Option<&Apple>),
@@ -295,11 +316,8 @@ fn check_for_collisions(
                         snake_head_transform.translation.y,
                     );
                 } else {
-                    println!(
-                        "[{:?}]Collision with Wall on {:?}",
-                        std::time::SystemTime::now(),
-                        collision
-                    );
+                    // game over if a wall is hit
+                    next_state.set(GameState::GameOver);
                 }
             }
         }
@@ -408,5 +426,45 @@ fn snake_spawn(
 fn score_update(mut scoreboard: ResMut<Scoreboard>, mut query: Query<&mut Text>) {
     for mut text in query.iter_mut() {
         text.sections[0].value = format!("Apples Eaten: {}", scoreboard.score);
+    }
+}
+
+fn display_final_score(mut commands: Commands, mut scoreboard: ResMut<Scoreboard>) {
+    commands
+        .spawn(NodeBundle {
+            style: Style {
+                width: Val::Percent(100.),
+                height: Val::Percent(100.),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                ..default()
+            },
+            ..default()
+        })
+        .with_children(|parent| {
+            parent.spawn(TextBundle::from_section(
+                format!("Total Apples eaten: {}", scoreboard.score),
+                TextStyle {
+                    font_size: 60.0,
+                    color: Color::rgb(0.5, 0.5, 1.0),
+                    ..default()
+                },
+            ));
+        });
+    scoreboard.score = 0;
+}
+
+fn gameover_keyboard_input(
+    keyboard_input: Res<ButtonInput<KeyCode>>,
+    mut next_state: ResMut<NextState<GameState>>,
+) {
+    if keyboard_input.just_pressed(KeyCode::Space) {
+        next_state.set(GameState::Playing);
+    }
+}
+
+fn teardown(mut commands: Commands, entities: Query<Entity, (Without<Camera>, Without<Window>)>) {
+    for entity in &entities {
+        commands.entity(entity).despawn();
     }
 }
