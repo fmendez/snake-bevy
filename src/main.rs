@@ -33,14 +33,6 @@ enum GameState {
 #[derive(Component)]
 struct Collider;
 
-#[derive(PartialEq)]
-enum Direction {
-    Up,
-    Down,
-    Left,
-    Right,
-}
-
 #[derive(Clone)]
 struct SnakeSegment {
     x: f32,
@@ -59,10 +51,8 @@ struct SnakeBodySegment;
 
 #[derive(Resource)]
 struct Snake {
-    direction: Direction,
     body: LinkedList<SnakeSegment>,
     head: SnakeSegment,
-    entity: Option<Entity>,
     move_cooldown: Timer,
 }
 
@@ -97,10 +87,8 @@ impl Default for Snake {
         }
 
         Snake {
-            direction: Direction::Up,
             head,
             body,
-            entity: None,
             move_cooldown: Timer::from_seconds(0.1, TimerMode::Once),
         }
     }
@@ -197,7 +185,6 @@ fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
-    mut snake: ResMut<Snake>,
 ) {
     commands.spawn(WallBundle::new(WallLocation::Left));
     commands.spawn(WallBundle::new(WallLocation::Right));
@@ -242,7 +229,7 @@ fn move_snake(
 
         snake.move_cooldown.reset();
         let mut current_position = snake_head_transform.translation;
-        let mut prev_position: Vec3 = Vec3::new(0., 0., 0.);
+        let mut prev_position;
         let movement_amount = STEP_SIZE * STEP_VELOCITY * time.delta_seconds();
 
         if keyboard_input.pressed(KeyCode::ArrowDown) {
@@ -288,7 +275,7 @@ fn check_for_collisions(
         (With<Collider>, Without<SnakeHead>),
     >,
 ) {
-    for (snake_segment_entity, snake_head_transform) in &snake_head_query {
+    for (_snake_segment_entity, snake_head_transform) in &snake_head_query {
         for (collider_entity, collider_transform, maybe_apple) in &collider_query {
             let snake_head_bounded = Aabb2d::new(
                 snake_head_transform.translation.truncate(),
@@ -303,7 +290,7 @@ fn check_for_collisions(
             let wall_or_apple_bounded =
                 Aabb2d::new(collider_transform.translation.truncate(), hitbox);
             let collision = collided_with_wall_apple(snake_head_bounded, wall_or_apple_bounded);
-            if let Some(collision) = collision {
+            if let Some(_collision) = collision {
                 if maybe_apple.is_some() {
                     scoreboard.score += 1;
                     commands.get_entity(collider_entity).unwrap().despawn();
@@ -395,9 +382,9 @@ fn snake_segment_spawn(
 }
 
 fn snake_spawn(
-    mut commands: &mut Commands,
-    mut meshes: &mut ResMut<Assets<Mesh>>,
-    mut materials: &mut ResMut<Assets<ColorMaterial>>,
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    materials: &mut ResMut<Assets<ColorMaterial>>,
 ) {
     let mut snake = Snake::default();
 
@@ -414,16 +401,12 @@ fn snake_spawn(
 
     for segment in snake.body.iter_mut() {
         segment.entity = Some(snake_segment_spawn(
-            &mut commands,
-            &mut meshes,
-            &mut materials,
-            segment.x,
-            segment.y,
+            commands, meshes, materials, segment.x, segment.y,
         ));
     }
 }
 
-fn score_update(mut scoreboard: ResMut<Scoreboard>, mut query: Query<&mut Text>) {
+fn score_update(scoreboard: ResMut<Scoreboard>, mut query: Query<&mut Text>) {
     for mut text in query.iter_mut() {
         text.sections[0].value = format!("Apples Eaten: {}", scoreboard.score);
     }
