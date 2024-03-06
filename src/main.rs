@@ -419,16 +419,33 @@ fn display_final_score(mut commands: Commands, mut scoreboard: ResMut<Scoreboard
                 width: Val::Percent(100.),
                 height: Val::Percent(100.),
                 align_items: AlignItems::Center,
-                justify_content: JustifyContent::Center,
+                flex_direction: FlexDirection::Column,
+                justify_content: JustifyContent::SpaceEvenly,
                 ..default()
             },
             ..default()
         })
         .with_children(|parent| {
             parent.spawn(TextBundle::from_section(
+                "Game Over".to_string(),
+                TextStyle {
+                    font_size: 80.0,
+                    color: Color::RED,
+                    ..default()
+                },
+            ));
+            parent.spawn(TextBundle::from_section(
                 format!("Total Apples eaten: {}", scoreboard.score),
                 TextStyle {
-                    font_size: 60.0,
+                    font_size: 40.0,
+                    color: Color::rgb(0.5, 0.5, 1.0),
+                    ..default()
+                },
+            ));
+            parent.spawn(TextBundle::from_section(
+                "Press Space to restart".to_string(),
+                TextStyle {
+                    font_size: 20.0,
                     color: Color::rgb(0.5, 0.5, 1.0),
                     ..default()
                 },
