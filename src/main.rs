@@ -435,7 +435,7 @@ fn display_final_score(mut commands: Commands, mut scoreboard: ResMut<Scoreboard
                 },
             ));
             parent.spawn(TextBundle::from_section(
-                format!("Total Apples eaten: {}", scoreboard.score),
+                format!("Total apples eaten: {}", scoreboard.score),
                 TextStyle {
                     font_size: 40.0,
                     color: Color::rgb(0.5, 0.5, 1.0),
